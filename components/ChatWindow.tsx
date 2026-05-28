@@ -2,11 +2,14 @@
 
 import { useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
+import { CorrectionDialog } from "./CorrectionDialog";
 
 type Citation = { id: number; source: string; title: string | null; url: string | null };
 
 type Message = {
   id: string;
+  /** Set on assistant messages once the server returns; used to anchor corrections. */
+  serverMessageId?: string;
   role: "user" | "assistant" | "system";
   content: string;
   imageUrls?: string[];
@@ -25,6 +28,7 @@ export function ChatWindow({ user }: Props) {
   const [pending, setPending] = useState(false);
   const [pendingUploads, setPendingUploads] = useState<string[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [correctingMessageId, setCorrectingMessageId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   async function uploadFile(file: File) {
@@ -94,6 +98,7 @@ export function ChatWindow({ user }: Props) {
         ...m,
         {
           id: crypto.randomUUID(),
+          serverMessageId: json.assistantMessageId,
           role: "assistant",
           content: json.reply,
           citations: json.retrieved as Citation[],
@@ -192,6 +197,14 @@ export function ChatWindow({ user }: Props) {
                 </ul>
               </details>
             ) : null}
+            {m.role === "assistant" && !m.error && m.serverMessageId && user?.role === "admin" && (
+              <button
+                onClick={() => setCorrectingMessageId(m.serverMessageId ?? null)}
+                className="text-xs text-mute hover:text-accent"
+              >
+                Correct this
+              </button>
+            )}
           </div>
         ))}
         {pending && (
@@ -262,6 +275,23 @@ export function ChatWindow({ user }: Props) {
           </button>
         </div>
       </form>
+      {correctingMessageId && (
+        <CorrectionDialog
+          messageId={correctingMessageId}
+          onClose={() => setCorrectingMessageId(null)}
+          onDone={(slug) => {
+            setCorrectingMessageId(null);
+            setMessages((m) => [
+              ...m,
+              {
+                id: crypto.randomUUID(),
+                role: "system",
+                content: `Correction submitted. Skill "${slug}" drafted — review at /admin/skills.`,
+              },
+            ]);
+          }}
+        />
+      )}
     </section>
   );
 }
