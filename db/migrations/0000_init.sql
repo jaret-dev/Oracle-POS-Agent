@@ -36,7 +36,9 @@ CREATE TABLE IF NOT EXISTS "oauth_tokens" (
   "rotated_at" timestamptz NOT NULL DEFAULT now(),
   "created_at" timestamptz NOT NULL DEFAULT now()
 );
-CREATE UNIQUE INDEX IF NOT EXISTS "oauth_tokens_provider_owner_idx" ON "oauth_tokens" ("provider","owner_user_id");
+-- NULLS NOT DISTINCT (Postgres 15+) so the shared "house" token row with
+-- owner_user_id IS NULL is enforced as a single row, not arbitrarily many.
+CREATE UNIQUE INDEX IF NOT EXISTS "oauth_tokens_provider_owner_idx" ON "oauth_tokens" ("provider","owner_user_id") NULLS NOT DISTINCT;
 
 CREATE TABLE IF NOT EXISTS "conversations" (
   "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),
