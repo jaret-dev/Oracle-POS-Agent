@@ -1,11 +1,17 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
+import ReactMarkdown from "react-markdown";
+
+type Citation = { id: number; source: string; title: string | null; url: string | null };
 
 type Message = {
   id: string;
   role: "user" | "assistant" | "system";
   content: string;
+  imageUrls?: string[];
+  citations?: Citation[];
+  error?: boolean;
 };
 
 type Props = {
@@ -13,29 +19,99 @@ type Props = {
 };
 
 export function ChatWindow({ user }: Props) {
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: "boot",
-      role: "system",
-      content:
-        "Chat backend is not wired yet. Phase 5 connects this to GPT-5.5 via Codex OAuth.",
-    },
-  ]);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [conversationId, setConversationId] = useState<string | null>(null);
   const [input, setInput] = useState("");
+  const [pending, setPending] = useState(false);
+  const [pendingUploads, setPendingUploads] = useState<string[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  function handleSend(e: React.FormEvent) {
+  async function uploadFile(file: File) {
+    setUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await fetch("/api/upload", { method: "POST", body: fd });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? `upload ${res.status}`);
+      setPendingUploads((u) => [...u, json.url as string]);
+    } catch (e) {
+      alert(`Upload failed: ${(e as Error).message}`);
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  function onFilePick(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files ?? []);
+    for (const f of files) void uploadFile(f);
+    e.target.value = "";
+  }
+
+  function onPaste(e: React.ClipboardEvent) {
+    const files = Array.from(e.clipboardData.files);
+    if (!files.length) return;
     e.preventDefault();
-    if (!input.trim()) return;
+    for (const f of files) void uploadFile(f);
+  }
+
+  async function send(e: React.FormEvent) {
+    e.preventDefault();
+    if (!input.trim() && !pendingUploads.length) return;
+    if (pending) return;
+
+    const userMsgId = crypto.randomUUID();
     setMessages((m) => [
       ...m,
-      { id: crypto.randomUUID(), role: "user", content: input },
       {
-        id: crypto.randomUUID(),
-        role: "assistant",
-        content: "[stub] Backend not connected. See Phase 5.",
+        id: userMsgId,
+        role: "user",
+        content: input,
+        imageUrls: pendingUploads.length ? [...pendingUploads] : undefined,
       },
     ]);
+    const sendText = input;
+    const sendImages = pendingUploads;
     setInput("");
+    setPendingUploads([]);
+    setPending(true);
+
+    try {
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          conversationId: conversationId ?? undefined,
+          text: sendText,
+          imageUrls: sendImages,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? `status ${res.status}`);
+      setConversationId(json.conversationId);
+      setMessages((m) => [
+        ...m,
+        {
+          id: crypto.randomUUID(),
+          role: "assistant",
+          content: json.reply,
+          citations: json.retrieved as Citation[],
+        },
+      ]);
+    } catch (e) {
+      setMessages((m) => [
+        ...m,
+        {
+          id: crypto.randomUUID(),
+          role: "assistant",
+          content: `Error: ${(e as Error).message}`,
+          error: true,
+        },
+      ]);
+    } finally {
+      setPending(false);
+    }
   }
 
   return (
@@ -48,52 +124,143 @@ export function ChatWindow({ user }: Props) {
           </p>
         </div>
         <div className="text-xs text-mute">
-          {user ? `signed in (${user.role})` : "not signed in"}
+          {user ? `${user.role}` : "not signed in"}
         </div>
       </header>
 
       <div className="flex-1 overflow-y-auto p-6 space-y-4">
+        {messages.length === 0 && (
+          <p className="text-mute text-sm italic">
+            Describe the issue. Paste a screenshot if it&apos;s a screen or menu problem.
+          </p>
+        )}
         {messages.map((m) => (
           <div
             key={m.id}
             className={
               m.role === "user"
-                ? "ml-auto max-w-[75%] bg-accent text-bg rounded-lg px-4 py-2"
-                : m.role === "system"
-                ? "max-w-[85%] bg-bg border border-warn/40 text-warn rounded-lg px-4 py-2 text-sm"
-                : "max-w-[75%] bg-panel border border-border rounded-lg px-4 py-2"
+                ? "ml-auto max-w-[75%] space-y-2"
+                : "max-w-[85%] space-y-2"
             }
           >
-            {m.content}
+            <div
+              className={
+                m.role === "user"
+                  ? "bg-accent text-bg rounded-lg px-4 py-2"
+                  : m.error
+                  ? "bg-bg border border-err/40 text-err rounded-lg px-4 py-2 font-mono text-sm whitespace-pre-wrap"
+                  : "bg-panel border border-border rounded-lg px-4 py-3 prose prose-invert prose-sm max-w-none"
+              }
+            >
+              {m.role === "assistant" && !m.error ? (
+                <ReactMarkdown>{m.content}</ReactMarkdown>
+              ) : (
+                <span className="whitespace-pre-wrap">{m.content}</span>
+              )}
+            </div>
+            {m.imageUrls?.length ? (
+              <div className="flex gap-2 flex-wrap">
+                {m.imageUrls.map((url) => (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    key={url}
+                    src={url}
+                    alt="attachment"
+                    className="max-h-48 rounded border border-border"
+                  />
+                ))}
+              </div>
+            ) : null}
+            {m.citations?.length ? (
+              <details className="text-xs text-mute">
+                <summary className="cursor-pointer hover:text-ink">
+                  {m.citations.length} source{m.citations.length === 1 ? "" : "s"}
+                </summary>
+                <ul className="mt-1 space-y-0.5">
+                  {m.citations.map((c) => (
+                    <li key={c.id}>
+                      <span className="text-accent">[{c.source}]</span>{" "}
+                      {c.url ? (
+                        <a href={c.url} target="_blank" rel="noreferrer" className="hover:underline">
+                          {c.title ?? c.url}
+                        </a>
+                      ) : (
+                        c.title ?? `chunk #${c.id}`
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            ) : null}
           </div>
         ))}
+        {pending && (
+          <div className="max-w-[75%] bg-panel border border-border rounded-lg px-4 py-2 text-mute text-sm">
+            Thinking…
+          </div>
+        )}
       </div>
 
-      <form
-        onSubmit={handleSend}
-        className="border-t border-border p-4 flex gap-2 items-end"
-      >
-        <button
-          type="button"
-          title="Attach image or screenshot (Phase 5)"
-          className="px-3 py-2 rounded border border-border text-mute hover:text-ink"
-          disabled
-        >
-          +
-        </button>
-        <textarea
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          rows={1}
-          placeholder="Describe the issue. Attach a screenshot for menu/screen problems."
-          className="flex-1 bg-panel border border-border rounded px-3 py-2 resize-none outline-none focus:border-accent"
-        />
-        <button
-          type="submit"
-          className="px-4 py-2 bg-accent hover:bg-accentMute text-bg font-medium rounded"
-        >
-          Send
-        </button>
+      <form onSubmit={send} className="border-t border-border p-4 space-y-2">
+        {pendingUploads.length > 0 && (
+          <div className="flex gap-2 flex-wrap">
+            {pendingUploads.map((url) => (
+              <div key={url} className="relative">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={url} alt="upload" className="h-16 rounded border border-border" />
+                <button
+                  type="button"
+                  onClick={() => setPendingUploads((u) => u.filter((x) => x !== url))}
+                  className="absolute -top-1 -right-1 bg-err text-bg rounded-full w-5 h-5 text-xs"
+                  aria-label="remove"
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="flex gap-2 items-end">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            multiple
+            onChange={onFilePick}
+            className="hidden"
+          />
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploading || pending}
+            title="Attach image or screenshot (or paste from clipboard)"
+            className="px-3 py-2 rounded border border-border text-mute hover:text-ink disabled:opacity-50"
+          >
+            {uploading ? "↑" : "+"}
+          </button>
+          <textarea
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onPaste={onPaste}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                void send(e as unknown as React.FormEvent);
+              }
+            }}
+            rows={1}
+            disabled={pending}
+            placeholder="Describe the issue. ⌘V to paste a screenshot."
+            className="flex-1 bg-panel border border-border rounded px-3 py-2 resize-none outline-none focus:border-accent disabled:opacity-50"
+          />
+          <button
+            type="submit"
+            disabled={pending || (!input.trim() && !pendingUploads.length)}
+            className="px-4 py-2 bg-accent hover:bg-accentMute disabled:opacity-50 text-bg font-medium rounded"
+          >
+            Send
+          </button>
+        </div>
       </form>
     </section>
   );
