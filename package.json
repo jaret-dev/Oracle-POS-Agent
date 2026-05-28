@@ -15,6 +15,7 @@
     "db:seed": "tsx scripts/seed-users.ts",
     "ingest:oracle": "tsx scripts/ingest-oracle-docs.ts",
     "ingest:embed": "tsx scripts/embed-memory.ts",
+    "db:load-embeddings": "tsx scripts/load-embeddings.ts",
     "evals:run": "tsx evals/runner.ts",
     "evals:judge": "tsx evals/judge.ts"
   },
@@ -41,6 +42,7 @@
     "@types/pg": "^8.11.10",
     "@types/react": "^19.0.2",
     "@types/react-dom": "^19.0.2",
+    "@types/turndown": "^5.0.6",
     "autoprefixer": "^10.4.20",
     "drizzle-kit": "^0.31.10",
     "p-limit": "^6.2.0",
