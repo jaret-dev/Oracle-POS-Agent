@@ -1,9 +1,15 @@
+"use client";
+
+import { useActionState } from "react";
+import { loginAction } from "./actions";
+
 export default function LoginPage() {
+  const [state, action, pending] = useActionState(loginAction, { error: null as string | null });
+
   return (
     <main className="min-h-screen grid place-items-center">
       <form
-        action="/api/auth/callback/credentials"
-        method="POST"
+        action={action}
         className="w-full max-w-sm bg-panel border border-border rounded-lg p-6 space-y-4"
       >
         <header className="space-y-1">
@@ -29,15 +35,18 @@ export default function LoginPage() {
             className="w-full bg-bg border border-border rounded px-3 py-2 outline-none focus:border-accent"
           />
         </label>
+        {state.error && (
+          <p className="text-sm text-err border border-err/40 rounded px-3 py-2 bg-err/5">
+            {state.error}
+          </p>
+        )}
         <button
           type="submit"
-          className="w-full bg-accent hover:bg-accentMute text-bg font-medium rounded px-3 py-2"
+          disabled={pending}
+          className="w-full bg-accent hover:bg-accentMute disabled:opacity-60 text-bg font-medium rounded px-3 py-2"
         >
-          Sign in
+          {pending ? "Signing in…" : "Sign in"}
         </button>
-        <p className="text-xs text-mute">
-          Auth wiring is stubbed in Phase 1. NextAuth credentials provider lands in Phase 3.
-        </p>
       </form>
     </main>
   );

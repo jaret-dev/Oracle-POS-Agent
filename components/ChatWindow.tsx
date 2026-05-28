@@ -8,7 +8,11 @@ type Message = {
   content: string;
 };
 
-export function ChatWindow() {
+type Props = {
+  user: { id: string; role: "admin" | "store" } | null;
+};
+
+export function ChatWindow({ user }: Props) {
   const [messages, setMessages] = useState<Message[]>([
     {
       id: "boot",
@@ -43,7 +47,9 @@ export function ChatWindow() {
             Facts only. No assumptions. Errors are logged.
           </p>
         </div>
-        <div className="text-xs text-mute">Not signed in</div>
+        <div className="text-xs text-mute">
+          {user ? `signed in (${user.role})` : "not signed in"}
+        </div>
       </header>
 
       <div className="flex-1 overflow-y-auto p-6 space-y-4">
