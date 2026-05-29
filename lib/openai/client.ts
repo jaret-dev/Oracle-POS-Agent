@@ -17,11 +17,38 @@ export type ResponsesInputMessage = {
 export type ResponsesRequest = {
   model?: string;
   input: ResponsesInputMessage[];
+  instructions?: string;
   reasoning?: { effort?: "low" | "medium" | "high" };
   max_output_tokens?: number;
   metadata?: Record<string, string>;
   stream?: boolean;
 };
+
+/**
+ * The Codex `responses` endpoint requires a top-level `instructions` string
+ * (it returns 400 "Instructions are required" otherwise). Our callers put the
+ * system prompt as a role:"system" message in `input`, so we hoist any system
+ * messages into `instructions` and drop them from `input`.
+ */
+function splitInstructions(req: ResponsesRequest): {
+  instructions: string;
+  input: ResponsesInputMessage[];
+} {
+  const sys: string[] = [];
+  if (req.instructions) sys.push(req.instructions);
+  const input: ResponsesInputMessage[] = [];
+  for (const msg of req.input) {
+    if (msg.role === "system") {
+      sys.push(msg.content.map((c) => ("text" in c ? c.text : "")).join(""));
+    } else {
+      input.push(msg);
+    }
+  }
+  return {
+    instructions: sys.join("\n\n") || "You are a helpful assistant.",
+    input,
+  };
+}
 
 export type ResponsesResult = {
   id: string;
@@ -38,15 +65,19 @@ export type ResponsesResult = {
  */
 export async function complete(req: ResponsesRequest): Promise<ResponsesResult> {
   const model = req.model ?? DEFAULT_MODEL;
-  const { access } = await getValidAccessToken(null);
+  const { access, accountId } = await getValidAccessToken(null);
+  const { instructions, input } = splitInstructions(req);
 
+  // The Codex endpoint is streaming-only (rejects stream:false). We request a
+  // stream and reassemble the full text + usage from the SSE events.
   const body = {
     model,
-    input: req.input,
+    instructions,
+    input,
+    store: false,
+    stream: true,
     ...(req.reasoning ? { reasoning: req.reasoning } : {}),
-    ...(req.max_output_tokens ? { max_output_tokens: req.max_output_tokens } : {}),
     ...(req.metadata ? { metadata: req.metadata } : {}),
-    stream: false,
   };
 
   const res = await fetch(CODEX_RESPONSES_URL, {
@@ -54,41 +85,90 @@ export async function complete(req: ResponsesRequest): Promise<ResponsesResult> 
     headers: {
       Authorization: `Bearer ${access}`,
       "Content-Type": "application/json",
+      Accept: "text/event-stream",
       "OpenAI-Beta": "responses=v1",
+      originator: "codex_cli_rs",
+      ...(accountId ? { "chatgpt-account-id": accountId } : {}),
     },
     body: JSON.stringify(body),
   });
 
-  if (!res.ok) {
+  if (!res.ok || !res.body) {
     const text = await res.text().catch(() => "");
     throw new Error(
       `[openai] ${model} responses call failed: ${res.status} ${text.slice(0, 500)}`
     );
   }
 
-  const json = (await res.json()) as {
-    id: string;
-    output?: Array<{ content?: Array<{ type: string; text?: string }> }>;
-    output_text?: string;
-    usage?: { input_tokens?: number; output_tokens?: number };
-    model?: string;
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let outputText = "";
+  let respId = "";
+  let finalModel = model;
+  let usage: { input_tokens?: number; output_tokens?: number } | undefined;
+  let errDetail: string | null = null;
+
+  const handleEvent = (data: string) => {
+    let evt: Record<string, unknown>;
+    try {
+      evt = JSON.parse(data);
+    } catch {
+      return;
+    }
+    const type = evt.type as string | undefined;
+    if (type === "response.output_text.delta" && typeof evt.delta === "string") {
+      outputText += evt.delta;
+    } else if (type === "response.completed" || type === "response.incomplete") {
+      const r = (evt.response ?? {}) as {
+        id?: string;
+        model?: string;
+        usage?: { input_tokens?: number; output_tokens?: number };
+        output?: Array<{ content?: Array<{ type: string; text?: string }> }>;
+      };
+      respId = r.id ?? respId;
+      finalModel = r.model ?? finalModel;
+      usage = r.usage ?? usage;
+      if (!outputText && Array.isArray(r.output)) {
+        outputText = r.output
+          .flatMap((o) => o.content ?? [])
+          .filter((c) => c.type === "output_text" || c.type === "text")
+          .map((c) => c.text ?? "")
+          .join("");
+      }
+    } else if (type === "response.failed" || type === "error") {
+      errDetail = JSON.stringify((evt.response as Record<string, unknown>)?.error ?? evt.error ?? evt);
+    }
   };
 
-  const output_text =
-    json.output_text ??
-    json.output
-      ?.flatMap((o) => o.content ?? [])
-      .filter((c) => c.type === "output_text" || c.type === "text")
-      .map((c) => c.text ?? "")
-      .join("") ??
-    "";
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const blocks = buffer.split("\n\n");
+    buffer = blocks.pop() ?? "";
+    for (const block of blocks) {
+      for (const line of block.split("\n")) {
+        const trimmed = line.trim();
+        if (trimmed.startsWith("data:")) {
+          const data = trimmed.slice(5).trim();
+          if (data && data !== "[DONE]") handleEvent(data);
+        }
+      }
+    }
+  }
+
+  if (errDetail) {
+    throw new Error(`[openai] ${model} stream error: ${errDetail}`);
+  }
 
   return {
-    id: json.id,
-    output_text,
-    raw: json,
-    usage: json.usage,
-    model: json.model ?? model,
+    id: respId,
+    output_text: outputText,
+    raw: null,
+    usage,
+    model: finalModel,
   };
 }
 
@@ -98,13 +178,15 @@ export async function complete(req: ResponsesRequest): Promise<ResponsesResult> 
  */
 export async function completeStream(req: ResponsesRequest): Promise<Response> {
   const model = req.model ?? DEFAULT_MODEL;
-  const { access } = await getValidAccessToken(null);
+  const { access, accountId } = await getValidAccessToken(null);
+  const { instructions, input } = splitInstructions(req);
 
   const body = {
     model,
-    input: req.input,
+    instructions,
+    input,
+    store: false,
     ...(req.reasoning ? { reasoning: req.reasoning } : {}),
-    ...(req.max_output_tokens ? { max_output_tokens: req.max_output_tokens } : {}),
     ...(req.metadata ? { metadata: req.metadata } : {}),
     stream: true,
   };
@@ -116,6 +198,8 @@ export async function completeStream(req: ResponsesRequest): Promise<Response> {
       "Content-Type": "application/json",
       Accept: "text/event-stream",
       "OpenAI-Beta": "responses=v1",
+      originator: "codex_cli_rs",
+      ...(accountId ? { "chatgpt-account-id": accountId } : {}),
     },
     body: JSON.stringify(body),
   });
