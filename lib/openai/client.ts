@@ -77,7 +77,6 @@ export async function complete(req: ResponsesRequest): Promise<ResponsesResult> 
     store: false,
     stream: true,
     ...(req.reasoning ? { reasoning: req.reasoning } : {}),
-    ...(req.metadata ? { metadata: req.metadata } : {}),
   };
 
   const res = await fetch(CODEX_RESPONSES_URL, {
@@ -187,7 +186,6 @@ export async function completeStream(req: ResponsesRequest): Promise<Response> {
     input,
     store: false,
     ...(req.reasoning ? { reasoning: req.reasoning } : {}),
-    ...(req.metadata ? { metadata: req.metadata } : {}),
     stream: true,
   };
 
