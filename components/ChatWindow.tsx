@@ -3,6 +3,21 @@
 import { useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { CorrectionDialog } from "./CorrectionDialog";
+import { sourceLabel } from "@/lib/sources";
+
+// Render markdown links as new-tab, accent-styled links (used for inline citations).
+const MD_COMPONENTS = {
+  a: ({ href, children }: { href?: string; children?: React.ReactNode }) => (
+    <a
+      href={href}
+      target="_blank"
+      rel="noreferrer"
+      className="text-accent underline underline-offset-2 hover:opacity-80"
+    >
+      {children}
+    </a>
+  ),
+};
 
 type Citation = { id: number; source: string; title: string | null; url: string | null };
 
@@ -158,7 +173,7 @@ export function ChatWindow({ user }: Props) {
               }
             >
               {m.role === "assistant" && !m.error ? (
-                <ReactMarkdown>{m.content}</ReactMarkdown>
+                <ReactMarkdown components={MD_COMPONENTS}>{m.content}</ReactMarkdown>
               ) : (
                 <span className="whitespace-pre-wrap">{m.content}</span>
               )}
@@ -184,7 +199,7 @@ export function ChatWindow({ user }: Props) {
                 <ul className="mt-1 space-y-0.5">
                   {m.citations.map((c) => (
                     <li key={c.id}>
-                      <span className="text-accent">[{c.source}]</span>{" "}
+                      <span className="text-accent">[{sourceLabel(c.source)}]</span>{" "}
                       {c.url ? (
                         <a href={c.url} target="_blank" rel="noreferrer" className="hover:underline">
                           {c.title ?? c.url}

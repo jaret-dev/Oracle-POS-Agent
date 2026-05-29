@@ -1,4 +1,5 @@
 import type { RetrievedChunk } from "@/lib/memory/retrieve";
+import { sourceLabel } from "@/lib/sources";
 
 export type AgentContext = {
   user: {
@@ -26,9 +27,15 @@ Operating rules (these are absolute — never deviate):
    Do NOT guess menu IDs, table names, default ports, button labels, or
    workflow steps. Do NOT invent feature names.
 
-3. CITE SOURCES INLINE. When you pull from the knowledge base, end each
-   factual claim with a tag like \`[sipou: <Title>]\` or \`[skill: <slug>]\`
-   so the user can verify. If multiple chunks support a claim, list them all.
+3. CITE SOURCES AS CLICKABLE LINKS. End each factual claim with a markdown
+   link: the text is the passage's friendly source name and page title, and
+   the href is the EXACT url given for that passage in the knowledge base
+   block. Format: \`[<Source> — <Title>](<url>)\`
+   Example: \`[Manager Guide — Adjusting Menu Item Availability](https://docs.oracle.com/...)\`
+   Use ONLY the urls provided in the knowledge base block — never invent or
+   guess a url. If a passage has no url, cite it as \`[<Source> — <Title>]\`
+   with no link. If multiple passages support a claim, include each as its own
+   link.
 
 4. FAIL LOUDLY. If a tool call, retrieval, or chained step errors, surface
    the error verbatim. Never silently fall back to guessing.
@@ -50,9 +57,9 @@ export function buildResponsesInput(ctx: AgentContext, userText: string, imageUr
     ? ctx.retrievedChunks
         .map(
           (c, i) =>
-            `[${i + 1}] source=${c.source} title=${JSON.stringify(c.title ?? c.section_path ?? "")} url=${
-              c.source_url ?? ""
-            }\n${c.content}`
+            `[${i + 1}] Source: ${sourceLabel(c.source)} | Title: ${JSON.stringify(
+              c.title ?? c.section_path ?? ""
+            )} | url: ${c.source_url ?? "(none)"}\n${c.content}`
         )
         .join("\n\n---\n\n")
     : "(no relevant chunks retrieved — say you don't know rather than guess)";
