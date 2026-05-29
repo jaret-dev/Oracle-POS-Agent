@@ -18,6 +18,11 @@ declare module "next-auth" {
 // Edge-safe: no providers that pull in Node-only modules (bcrypt, pg, etc.).
 // The full credentials provider lives in auth.ts and is only used in Node runtime.
 export const authConfig = {
+  // trustHost is required on Vercel preview/prod URLs; otherwise NextAuth v5
+  // throws UntrustedHost. Explicit secret so it works whether the env var is
+  // named NEXTAUTH_SECRET or AUTH_SECRET.
+  trustHost: true,
+  secret: process.env.NEXTAUTH_SECRET ?? process.env.AUTH_SECRET,
   session: { strategy: "jwt", maxAge: 60 * 60 * 24 * 14 },
   pages: { signIn: "/login" },
   providers: [],
