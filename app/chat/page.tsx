@@ -1,10 +1,13 @@
+import { redirect } from "next/navigation";
 import { auth, signOut } from "@/auth";
 import { TopicSidebar } from "@/components/TopicSidebar";
 import { ChatWindow } from "@/components/ChatWindow";
 
 export default async function ChatPage() {
   const session = await auth();
-  const user = session?.user;
+  // No edge middleware anymore: this server-side check is the gate for /chat.
+  if (!session) redirect("/login");
+  const user = session.user;
 
   async function signOutAction() {
     "use server";
@@ -14,18 +17,14 @@ export default async function ChatPage() {
   return (
     <main className="h-screen grid grid-cols-[320px_1fr]">
       <TopicSidebar
-        user={
-          user
-            ? {
-                name: user.name ?? user.username,
-                role: user.role,
-                storeNumber: user.storeNumber,
-              }
-            : null
-        }
+        user={{
+          name: user.name ?? user.username,
+          role: user.role,
+          storeNumber: user.storeNumber,
+        }}
         signOutAction={signOutAction}
       />
-      <ChatWindow user={user ? { id: user.id, role: user.role } : null} />
+      <ChatWindow user={{ id: user.id, role: user.role }} />
     </main>
   );
 }
