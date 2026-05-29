@@ -33,7 +33,8 @@ function vecLiteral(v: number[]): string {
 }
 
 async function main() {
-  if (!process.env.POSTGRES_URL) throw new Error("POSTGRES_URL is required");
+  if (!process.env.POSTGRES_URL && !process.env.DATABASE_URL)
+    throw new Error("POSTGRES_URL or DATABASE_URL is required");
 
   if (FORCE) {
     console.log("[load] --force: truncating memory_chunks");

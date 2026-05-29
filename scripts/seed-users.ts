@@ -11,8 +11,8 @@ import { SEED_USERS } from "../db/users";
 import { sql } from "drizzle-orm";
 
 async function main() {
-  if (!process.env.POSTGRES_URL) {
-    throw new Error("POSTGRES_URL must be set");
+  if (!process.env.POSTGRES_URL && !process.env.DATABASE_URL) {
+    throw new Error("POSTGRES_URL or DATABASE_URL must be set");
   }
 
   console.log(`[seed] upserting ${SEED_USERS.length} users…`);

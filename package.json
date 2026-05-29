@@ -12,6 +12,7 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",
+    "db:init": "tsx scripts/apply-sql.ts db/migrations/0000_init.sql",
     "db:seed": "tsx scripts/seed-users.ts",
     "ingest:oracle": "tsx scripts/ingest-oracle-docs.ts",
     "ingest:embed": "tsx scripts/embed-memory.ts",
