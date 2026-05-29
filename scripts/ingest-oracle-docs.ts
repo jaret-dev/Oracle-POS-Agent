@@ -124,11 +124,22 @@ async function crawl(source: SourceKey, indexUrl: string) {
   console.log(`[ingest] ${source}: fetching index ${indexUrl}`);
   const indexHtml = await fetchText(indexUrl);
 
-  // BFS frontier: start from every link found on the index page that's
-  // under the same docs subdir.
   const seen = new Set<string>();
-  const frontier: string[] = sameDirLinks(extractLinks(indexHtml, indexUrl), indexUrl);
   seen.add(indexUrl);
+
+  // The Oracle "book template" renders its real table of contents in a
+  // sibling toc.htm — the index page itself links to almost nothing. Fetch
+  // the toc and harvest every content link from it.
+  const frontier: string[] = sameDirLinks(extractLinks(indexHtml, indexUrl), indexUrl);
+  const tocUrl = indexUrl.replace(/index\.html?$/i, "toc.htm");
+  try {
+    const tocHtml = await fetchText(tocUrl);
+    await savePage(source, tocUrl, tocHtml, "toc");
+    seen.add(tocUrl);
+    frontier.push(...sameDirLinks(extractLinks(tocHtml, tocUrl), tocUrl));
+  } catch (e) {
+    console.warn(`[ingest] ${source}: could not fetch toc ${tocUrl}: ${(e as Error).message}`);
+  }
 
   // Also save the index itself.
   const allPages: Array<{ url: string; slug: string }> = [];
